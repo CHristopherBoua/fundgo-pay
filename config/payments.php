@@ -86,8 +86,13 @@ return [
         'non_retryable_codes' => [
             'AC01', 'AC04', 'AC06', 'AG01', 'MD01', 'MD07', 'MS02', 'SL01',
             'mandate_revoked', 'mandate_invalid', 'authentication_required', 'card_expired',
+            // codes Stripe
+            'expired_card', 'stolen_card', 'lost_card', 'account_closed', 'no_account', 'debit_not_authorized',
         ],
         // Codes qui invalident définitivement le moyen de paiement.
-        'revoke_method_codes' => ['AC01', 'AC04', 'AC06', 'MD01', 'MD07', 'mandate_revoked', 'mandate_invalid', 'card_expired'],
+        'revoke_method_codes' => [
+            'AC01', 'AC04', 'AC06', 'MD01', 'MD07', 'mandate_revoked', 'mandate_invalid', 'card_expired',
+            'expired_card', 'stolen_card', 'lost_card', 'account_closed', 'no_account', 'debit_not_authorized',
+        ],
     ],
 ];

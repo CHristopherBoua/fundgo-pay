@@ -1,59 +1,111 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# FundGo Pay
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Plateforme **privée** de dons. Laravel 12 + [Omnipay](https://omnipay.thephpleague.com/).
 
-## About Laravel
+Un donateur peut :
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- faire un **don ponctuel** (prélèvement SEPA immédiat, ou carte via la page sécurisée du PSP) ;
+- mettre en place un **don régulier**, mensuel, trimestriel ou annuel, prélevé automatiquement (mandat SEPA, ou carte enregistrée par 3DS puis débitée hors session) ;
+- se connecter à son **espace donateur** pour voir son historique et ses totaux, et pour **modifier le montant, suspendre, reprendre, changer de moyen de paiement ou arrêter** son don sans contacter personne ;
+- recevoir chaque année son **reçu fiscal** (cerfa 11580*05) en PDF, par e-mail et dans son espace.
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Démarrage
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+```bash
+composer install
+cp .env.example .env
+php artisan key:generate
+php artisan migrate --seed
+php artisan serve
+```
 
-## Learning Laravel
+Ouvrir http://localhost:8000. Le compte de démo est `demo@fundgo.test` ; son mot de passe se trouve dans `database/seeders/DatabaseSeeder.php`.
+Par défaut, la passerelle **`fake`** simule un PSP sans réseau :
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+- un titulaire contenant `FAIL` provoque un rejet AM04 (provision insuffisante), ce qui déclenche les relances ;
+- un titulaire contenant `REVOKED` provoque un rejet MD01 (mandat révoqué) ;
+- la page de carte simulée propose « Payer », « Refuser » ou « Annuler ».
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+IBAN de test valide : `FR76 3000 6000 0112 3456 7890 189`.
 
-## Laravel Sponsors
+Tâches planifiées (cron : `* * * * * php artisan schedule:run`) :
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+| Commande | Rôle |
+|---|---|
+| `donations:prenotify` | Pré-notification SEPA à J-14 |
+| `donations:charge-due` | Encaisse les échéances dues. Idempotente, on peut la relancer sans risque |
+| `donations:retry-failed` | Relances (dunning) à J+3 puis J+7 |
+| `payments:replay-events --failed` | Rejoue les webhooks en erreur |
+| `ledger:verify [--balance]` | Vérifie la chaîne de hash du grand livre |
+| `tax-receipts:issue [année] [--dry-run]` | Reçus fiscaux de l'année écoulée (planifié le 15 janvier). Idempotente |
 
-### Premium Partners
+## Reçus fiscaux
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+Un **reçu récapitulatif annuel** par donateur, selon le modèle cerfa 11580*05, avec une annexe qui détaille chaque versement.
 
-## Contributing
+- **Ce qui est couvert** : les paiements encaissés dans l'année civile, sur les campagnes marquées `tax_deductible`. Un don avec contrepartie, comme un billet de gala, en est exclu.
+- **Numérotation** : `AAAA-NNNNNN`, continue par année, attribuée sous verrou. Il ne peut y avoir ni trou ni doublon.
+- **Immuable** : à l'émission, on fige l'identité du donateur, celle de l'organisme et la liste des paiements, avec une empreinte SHA-256. Le PDF est regénéré à l'identique à chaque téléchargement. Le modèle refuse toute modification ou suppression.
+- **Remboursement ou rejet** d'un don déjà reçu : le reçu est **annulé** et un **reçu rectificatif** est émis automatiquement, avec un nouveau numéro et la mention « annule et remplace ». Si plus rien n'est éligible, le reçu est seulement annulé et le donateur prévenu.
+- **Adresse obligatoire** : sans adresse complète, aucun reçu n'est émis. L'espace donateur le signale, et le donateur peut obtenir son reçu lui-même une fois l'adresse complétée (bouton « Obtenir mon reçu »).
+- **Configuration** : les informations de l'organisme se règlent dans `.env` ou `config/tax_receipts.php` (dénomination, RNA/SIREN, objet, qualité, signataire, signature scannée, article du CGI).
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+> ⚠️ Délivrer des reçus sans y être éligible expose l'organisme à une amende de 20 % des sommes mentionnées (art. 1740 A du CGI). Faites valider l'éligibilité et les mentions par votre expert-comptable avant la mise en production.
 
-## Code of Conduct
+## Architecture
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+```
+app/Payments/                     ← couche PSP-agnostique
+  Contracts/PaymentDriver.php     contrat unique vu par le métier
+  GatewayManager.php              résout le driver (config/payments.php), routage par moyen de paiement
+  Drivers/AbstractOmnipayDriver   socle Omnipay (création de la passerelle, erreurs, montants)
+  Drivers/MollieDriver            omnipay/mollie : mandats directdebit, first/recurring, webhook relu par API
+  Drivers/StripeDriver            omnipay/stripe PaymentIntents + passerelle étendue
+  Drivers/FakeDriver              PSP simulé (dev, démo, tests)
+  Omnipay/Stripe/                 FundgoStripeGateway : SEPA SetupIntent, Checkout, MIT, refund
+app/Services/
+  Payments/PaymentProcessor       machine à états des paiements, SEUL point d'application d'un statut
+  Payments/ChargeService          échéances, relances, anti-double-débit
+  Payments/MandateService         signature électronique du mandat SEPA (RUM, ICS, preuve)
+  Payments/GatewayEventIngestor   webhooks idempotents + rejeu
+  Donations/DonationService       orchestration don ponctuel / régulier
+  Donations/RecurringDonationService  cycle de vie du don régulier, pré-notifications
+  Ledger/LedgerService            grand livre en partie double, append-only, chaîné SHA-256
+```
 
-## Security Vulnerabilities
+### Changer de PSP
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+Le cœur ne connaît que `PaymentDriver`. Changer de PSP revient à changer une variable d'environnement, et on peut répartir par moyen de paiement :
 
-## License
+```dotenv
+PAYMENTS_SEPA_GATEWAY=mollie   # prélèvements SEPA via Mollie
+PAYMENTS_CARD_GATEWAY=stripe   # cartes via Stripe
+```
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Pour ajouter un PSP compatible Omnipay (GoCardless, Adyen, PayPlug…) : installer son driver Omnipay, écrire une classe `XxxDriver extends AbstractOmnipayDriver`, puis la déclarer dans `config/payments.php`. Si le driver Omnipay ne couvre pas une opération (cas de Stripe pour le SEPA), on **étend la passerelle Omnipay** avec de nouvelles requêtes, comme `FundgoStripeGateway`.
+
+> Omnipay est conçu pour le paiement ponctuel. Les mandats et le récurrent dépendent de chaque driver ; c'est pourquoi la logique d'échéancier, de relances et de pré-notification vit **chez nous** et non chez le PSP.
+
+### Garanties
+
+- **Pas de double débit** : la ligne `payments` (unique par don, échéance et tentative) est créée et l'échéancier avancé dans la même transaction. L'appel au PSP se fait après le commit, avec une clé d'idempotence (Stripe).
+- **Webhooks** : signature vérifiée (Stripe), ou transaction relue par API (Mollie). Stockage brut, unicité `(gateway, event_id)`, transitions d'état monotones (un webhook arrivé en retard est ignoré), rejeu possible.
+- **Grand livre** : chaque encaissement donne débit `psp:{gw}:clearing` / crédit `fund:campaign:{id}`. Les remboursements et rejets sont contre-passés. Des triggers SQL interdisent UPDATE et DELETE, et `ledger:verify` détecte toute altération, même si les triggers ont été supprimés.
+- **Données sensibles** : l'IBAN complet n'est jamais stocké (on garde les 4 derniers caractères et une empreinte HMAC) ; aucun PAN.
+- **Audit** : `audit_logs` enregistre qui, quoi, avant/après, IP et user-agent.
+- **SEPA** : RUM unique, ICS, texte du mandat versionné, preuve d'acceptation (IP, UA, horodatage), première échéance à J+14 au plus tôt, pré-notification de chaque échéance.
+
+## Tests
+
+```bash
+php artisan test
+```
+
+La suite compte 48 tests : parcours complets (SEPA ponctuel et mensuel, carte 3DS puis MIT, relances, révocation de mandat, rejet, idempotence des webhooks, gestion depuis l'espace donateur, IDOR), intégrité du grand livre, reçus fiscaux (éligibilité, numérotation, rectificatif, PDF, accès), et drivers Mollie et Stripe testés contre des réponses HTTP enregistrées (aucun appel réseau).
+
+## Reste à faire
+
+- Réconciliation des relevés bancaires CAMT.053 avec les versements du PSP et le grand livre ;
+- Back-office administrateur (campagnes, remboursements, export comptable) ;
+- Réinitialisation du mot de passe et vérification de l'e-mail ;
+- Tests contre les sandbox Mollie et Stripe réelles (clés de test).

@@ -64,4 +64,15 @@ class User extends Authenticatable
     {
         return $this->hasMany(GatewayCustomer::class);
     }
+
+    public function taxReceipts(): HasMany
+    {
+        return $this->hasMany(TaxReceipt::class);
+    }
+
+    /** Mentions obligatoires du cerfa 11580 : nom et adresse complète du donateur. */
+    public function hasCompleteAddress(): bool
+    {
+        return filled($this->address_line1) && filled($this->postal_code) && filled($this->city);
+    }
 }

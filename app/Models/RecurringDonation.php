@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\DateOnly;
 use App\Enums\Frequency;
 use App\Enums\RecurringStatus;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
@@ -26,9 +27,9 @@ class RecurringDonation extends Model
             'day_of_month' => 'integer',
             'frequency' => Frequency::class,
             'status' => RecurringStatus::class,
-            'next_charge_on' => 'immutable_date',
-            'prenotified_for' => 'immutable_date',
-            'paused_until' => 'immutable_date',
+            'next_charge_on' => DateOnly::class,
+            'prenotified_for' => DateOnly::class,
+            'paused_until' => DateOnly::class,
             'started_at' => 'datetime',
             'cancelled_at' => 'datetime',
         ];

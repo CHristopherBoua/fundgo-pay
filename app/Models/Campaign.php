@@ -10,11 +10,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Campaign extends Model
 {
+    /** @use HasFactory<\Database\Factories\CampaignFactory> */
     use HasFactory, HasUlids;
 
     protected $fillable = [
         'slug', 'title', 'summary', 'description', 'currency', 'goal_cents',
-        'status', 'allows_recurring', 'starts_at', 'ends_at',
+        'status', 'allows_recurring', 'tax_deductible', 'starts_at', 'ends_at',
     ];
 
     protected function casts(): array
@@ -22,6 +23,7 @@ class Campaign extends Model
         return [
             'goal_cents' => 'integer',
             'allows_recurring' => 'boolean',
+            'tax_deductible' => 'boolean',
             'starts_at' => 'datetime',
             'ends_at' => 'datetime',
         ];

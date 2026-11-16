@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\DateOnly;
 use App\Enums\PaymentMethodType;
 use App\Enums\PaymentStatus;
 use App\Enums\SequenceType;
@@ -28,7 +29,7 @@ class Payment extends Model
             'status' => PaymentStatus::class,
             'method_type' => PaymentMethodType::class,
             'sequence_type' => SequenceType::class,
-            'period' => 'immutable_date',
+            'period' => DateOnly::class,
             'next_retry_at' => 'datetime',
             'submitted_at' => 'datetime',
             'paid_at' => 'datetime',
