@@ -30,6 +30,8 @@ trait FakesPspHttp
         $stack->push(Middleware::history($this->pspHistory));
 
         $this->app->instance('omnipay.http_client', new OmnipayHttpClient(new GuzzleAdapter(new GuzzleClient(['handler' => $stack]))));
+        // Les drivers gardent leur passerelle Omnipay en mémoire : on repart d'instances neuves.
+        $this->app->forgetInstance(\App\Payments\GatewayManager::class);
     }
 
     protected function pspRequest(int $i): RequestInterface

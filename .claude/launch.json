@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "laravel",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set VIEW_COMPILED_PATH=%TEMP%\\fundgo-views&& set TAX_RECEIPT_FONT_CACHE=%TEMP%\\fundgo-fonts&& set LOG_CHANNEL=stderr&& set SESSION_DRIVER=cookie&& php artisan serve --host=127.0.0.1 --port=8000"
+      ],
+      "port": 8000
+    },
+    {
+      "name": "dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 5173
+    }
+  ]
+}

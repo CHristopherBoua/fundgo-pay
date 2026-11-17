@@ -37,6 +37,19 @@ class DatabaseSeeder extends Seeder
             'allows_recurring' => true,
         ]);
 
+        // Campagne en francs CFA : carte (UBA) ou compte Ecobank selon le routage .env.
+        Campaign::firstOrCreate(['slug' => 'puits-thies'], [
+            'title' => 'Un puits pour le village de Thiès',
+            'summary' => 'Eau potable pour 600 habitants - dons en FCFA.',
+            'description' => "Forage, pompe solaire et formation d'un comité de gestion.\nPaiement par carte ou compte Ecobank.",
+            'currency' => 'XOF',
+            'country' => 'SN',
+            'goal_cents' => 15_000_000, // 15 000 000 FCFA (pas de subdivision)
+            'status' => 'open',
+            'allows_recurring' => true,
+            'tax_deductible' => false, // reçu fiscal français : dons en euros uniquement
+        ]);
+
         Campaign::firstOrCreate(['slug' => 'gala-2026'], [
             'title' => 'Gala annuel 2026',
             'summary' => 'Soirée de levée de fonds - dons ponctuels uniquement.',

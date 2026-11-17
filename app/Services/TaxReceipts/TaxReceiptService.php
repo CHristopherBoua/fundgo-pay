@@ -54,6 +54,7 @@ class TaxReceiptService
             ->with('campaign')
             ->where('user_id', $user->id)
             ->where('status', PaymentStatus::Paid)
+            ->where('currency', 'EUR') // reçu fiscal français : dons en euros uniquement
             ->where('paid_at', '>=', $start)
             ->where('paid_at', '<', $start->addYear())
             ->where(fn (Builder $q) => $q->whereNull('campaign_id')

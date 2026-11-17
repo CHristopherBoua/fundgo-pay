@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Payments\Contracts\ParsesWebhookBatches;
 use App\Payments\Exceptions\InvalidWebhookSignature;
 use App\Payments\Exceptions\PaymentGatewayException;
 use App\Payments\GatewayManager;
@@ -21,7 +22,9 @@ class WebhookController extends Controller
         }
 
         try {
-            $event = $driver->parseWebhook($request);
+            $events = $driver instanceof ParsesWebhookBatches
+                ? $driver->parseWebhookBatch($request)
+                : [$driver->parseWebhook($request)];
         } catch (InvalidWebhookSignature $e) {
             Log::warning('[webhook] rejected', ['gateway' => $gateway, 'reason' => $e->getMessage(), 'ip' => $request->ip()]);
 
@@ -31,10 +34,13 @@ class WebhookController extends Controller
             return response('temporarily unavailable', 503);
         }
 
-        $row = $ingestor->ingest($gateway, $event);
+        $errors = 0;
+        foreach ($events as $event) {
+            $errors += $ingestor->ingest($gateway, $event)->error ? 1 : 0;
+        }
 
         // 200 même en cas d'erreur de traitement : l'événement est stocké et sera rejoué
         // (payments:replay-events --failed), inutile de faire boucler le PSP.
-        return response($row->error ? 'stored' : 'ok', 200);
+        return response($errors ? 'stored' : 'ok', 200);
     }
 }

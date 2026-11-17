@@ -5,7 +5,9 @@ use App\Http\Controllers\Auth\RegisterController;
 use App\Http\Controllers\CampaignController;
 use App\Http\Controllers\CheckoutReturnController;
 use App\Http\Controllers\DonationController;
+use App\Http\Controllers\EcobankController;
 use App\Http\Controllers\Donor\DashboardController;
+use App\Http\Controllers\Donor\InstallmentController;
 use App\Http\Controllers\Donor\PaymentMethodController;
 use App\Http\Controllers\Donor\ProfileController;
 use App\Http\Controllers\Donor\RecurringDonationController;
@@ -30,6 +32,16 @@ Route::middleware('auth')->group(function () {
     Route::post('/dons', [DonationController::class, 'store'])->middleware('throttle:donate')->name('donations.store');
     Route::get('/paiement/{payment}/retour', CheckoutReturnController::class)->name('checkout.return');
 
+    // Ecobank Direct Debit : liaison du compte (une fois) puis validation OTP de chaque paiement.
+    Route::prefix('paiement/{payment}/ecobank')->middleware('throttle:donate')->group(function () {
+        Route::get('/', [EcobankController::class, 'show'])->withoutMiddleware('throttle:donate')->name('ecobank.show');
+        Route::post('/lier/code', [EcobankController::class, 'sendOtp'])->name('ecobank.link.send');
+        Route::post('/lier/verifier', [EcobankController::class, 'verifyOtp'])->name('ecobank.link.verify');
+        Route::post('/lier/activer', [EcobankController::class, 'completeProfile'])->name('ecobank.link.complete');
+        Route::post('/demande', [EcobankController::class, 'initiate'])->name('ecobank.initiate');
+        Route::post('/confirmer', [EcobankController::class, 'confirm'])->name('ecobank.confirm');
+    });
+
     Route::prefix('espace')->group(function () {
         Route::get('/', DashboardController::class)->name('dashboard');
         Route::patch('/profil', [ProfileController::class, 'update'])->name('profile.update');
@@ -43,7 +55,9 @@ Route::middleware('auth')->group(function () {
         Route::post('/moyens-de-paiement/sepa', [PaymentMethodController::class, 'storeSepa'])->name('payment-methods.sepa');
         Route::delete('/moyens-de-paiement/{method}', [PaymentMethodController::class, 'destroy'])->name('payment-methods.destroy');
 
-        Route::post('/recus-fiscaux', [TaxReceiptController::class, 'store'])->middleware('throttle:donate')->name('tax-receipts.store');
+        Route::get('/echeances/{payment}/payer', [InstallmentController::class, 'pay'])->middleware('throttle:donate')->name('installments.pay');
+
+        Route::post('/recus-fiscaux',[TaxReceiptController::class, 'store'])->middleware('throttle:donate')->name('tax-receipts.store');
         Route::get('/recus-fiscaux/{receipt}', [TaxReceiptController::class, 'download'])->name('tax-receipts.download');
     });
 });

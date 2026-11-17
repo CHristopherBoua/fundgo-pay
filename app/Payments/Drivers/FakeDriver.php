@@ -46,6 +46,17 @@ class FakeDriver implements PaymentDriver
         return true;
     }
 
+    public function supportsCurrency(string $currency): bool
+    {
+        return true;
+    }
+
+    /** Imite les passerelles réelles : un compte Ecobank exige l'OTP du donateur à chaque débit. */
+    public function supportsOffSession(PaymentMethodType $type): bool
+    {
+        return $type !== PaymentMethodType::EcobankAccount;
+    }
+
     public function createCustomer(User $user): string
     {
         return 'fcus_'.Str::lower(Str::random(14));

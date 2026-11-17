@@ -22,6 +22,16 @@ class PaymentFailed extends Notification
     public function toMail(object $notifiable): MailMessage
     {
         $p = $this->payment;
+
+        if ($p->failure_code === 'not_paid') {
+            return (new MailMessage)
+                ->subject('Échéance de votre don non réglée')
+                ->greeting('Bonjour '.$notifiable->name.',')
+                ->line('L\'échéance du '.$p->period?->format('d/m/Y').' ('.Money::format($p->amount_cents, $p->currency).') n\'a pas été réglée et a été annulée.')
+                ->line('Votre don régulier continue : la prochaine échéance vous sera envoyée. Vous pouvez aussi le suspendre depuis votre espace.')
+                ->action('Mon espace donateur', route('dashboard'));
+        }
+
         $mail = (new MailMessage)
             ->subject('Votre don n\'a pas pu être prélevé')
             ->greeting('Bonjour '.$notifiable->name.',')

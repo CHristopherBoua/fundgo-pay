@@ -14,7 +14,7 @@ class Campaign extends Model
     use HasFactory, HasUlids;
 
     protected $fillable = [
-        'slug', 'title', 'summary', 'description', 'currency', 'goal_cents',
+        'slug', 'title', 'summary', 'description', 'currency', 'country', 'goal_cents',
         'status', 'allows_recurring', 'tax_deductible', 'starts_at', 'ends_at',
     ];
 

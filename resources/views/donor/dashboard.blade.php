@@ -7,11 +7,28 @@
 <h1>Bonjour {{ $user->name }}</h1>
 <p class="muted">Merci pour votre engagement. Tout se gère ici, sans appeler personne.</p>
 
+@php($sumLine = fn (array $byCur) => $byCur ? collect($byCur)->map(fn ($v, $c) => $fmt($v, $c))->implode(' · ') : $fmt(0))
 <div class="grid" style="margin:24px 0">
-    <div class="card"><div class="muted">Donné en {{ now()->year }}</div><div class="stat">{{ $fmt($totalThisYear) }}</div></div>
-    <div class="card"><div class="muted">Depuis le début</div><div class="stat">{{ $fmt($totalLifetime) }}</div></div>
+    <div class="card"><div class="muted">Donné en {{ now()->year }}</div><div class="stat">{{ $sumLine($totalThisYear) }}</div></div>
+    <div class="card"><div class="muted">Depuis le début</div><div class="stat">{{ $sumLine($totalLifetime) }}</div></div>
     <div class="card"><div class="muted">Dons réguliers actifs</div><div class="stat">{{ $recurring->where('status', \App\Enums\RecurringStatus::Active)->count() }}</div></div>
 </div>
+
+@if ($installments->isNotEmpty())
+<section class="card stack" style="margin-bottom:24px" id="echeances">
+    <h2>Échéances à régler</h2>
+    @foreach ($installments as $p)
+        <div class="row" style="justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:12px">
+            <div>
+                <strong>{{ $fmt($p->amount_cents, $p->currency) }}</strong>
+                <span class="muted">- {{ $p->campaign?->title ?? 'Don libre' }} · échéance du {{ $p->period?->format('d/m/Y') }}</span>
+                <div class="fineprint">{{ $p->method_type->label() }}@if (! empty($p->metadata['link_expires_on'])) · à régler avant le {{ \Carbon\CarbonImmutable::parse($p->metadata['link_expires_on'])->format('d/m/Y') }}@endif</div>
+            </div>
+            <a class="btn small" href="{{ route('installments.pay', $p->id) }}">Régler</a>
+        </div>
+    @endforeach
+</section>
+@endif
 
 <section class="card stack" style="margin-bottom:24px">
     <h2>Mes dons réguliers</h2>
@@ -26,7 +43,8 @@
             </div>
             <div class="fineprint">
                 @if ($rd->next_charge_on && $rd->status === \App\Enums\RecurringStatus::Active)
-                    Prochain prélèvement le {{ $rd->next_charge_on->format('d/m/Y') }}
+                    {{ $rd->isPayByLink() ? 'Prochaine échéance (lien envoyé par e-mail) le' : 'Prochain prélèvement le' }} {{ $rd->next_charge_on->format('d/m/Y') }}
+                    @if ($rd->isPayByLink()) · {{ $rd->method_type?->label() }} @endif
                 @elseif ($rd->status === \App\Enums\RecurringStatus::Paused && $rd->paused_until)
                     En pause jusqu'au {{ $rd->paused_until->format('d/m/Y') }}
                 @endif
@@ -39,7 +57,7 @@
                     <form method="post" action="{{ route('recurring.amount', $rd->id) }}" class="row">
                         @csrf @method('patch')
                         <label class="sr-only" for="amount-{{ $rd->id }}" hidden>Nouveau montant</label>
-                        <input id="amount-{{ $rd->id }}" type="text" inputmode="decimal" name="amount" value="{{ number_format($rd->amount_cents / 100, 2, ',', '') }}" style="width:110px" aria-label="Nouveau montant">
+                        <input id="amount-{{ $rd->id }}" type="text" inputmode="decimal" name="amount" value="{{ \App\Support\Money::input($rd->amount_cents, $rd->currency) }}" style="width:110px" aria-label="Nouveau montant">
                         <button class="btn small secondary">Modifier le montant</button>
                     </form>
 

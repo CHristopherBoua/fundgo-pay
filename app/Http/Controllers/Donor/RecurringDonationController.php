@@ -33,8 +33,9 @@ class RecurringDonationController extends Controller
 
     public function amount(Request $request, string $recurring): RedirectResponse
     {
-        $data = $request->validate(['amount' => ['required', 'regex:/^\d{1,6}([.,]\d{1,2})?$/']]);
-        $this->service->changeAmount($this->find($request, $recurring), Money::toCents($data['amount']));
+        $data = $request->validate(['amount' => ['required', 'regex:/^\d{1,9}([.,]\d{1,2})?$/']]);
+        $rd = $this->find($request, $recurring);
+        $this->service->changeAmount($rd, Money::toMinor($data['amount'], $rd->currency));
 
         return back()->with('status', 'Montant mis à jour.');
     }

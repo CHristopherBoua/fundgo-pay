@@ -3,6 +3,8 @@
 namespace App\Services\Donations;
 
 use App\Enums\Frequency;
+use App\Enums\PaymentMethodType;
+use App\Support\Money;
 use App\Enums\RecurringStatus;
 use App\Models\PaymentMethod;
 use App\Models\RecurringDonation;
@@ -27,8 +29,9 @@ class RecurringDonationService
             'user_id' => $user->id,
             'campaign_id' => $request->campaign?->id,
             'payment_method_id' => $method->id,
+            'collection_mode' => RecurringDonation::MODE_AUTOMATIC,
             'amount_cents' => $request->amountCents,
-            'currency' => config('payments.currency'),
+            'currency' => $request->currency(),
             'frequency' => $request->frequency,
             'day_of_month' => $request->dayOfMonth,
             'status' => RecurringStatus::Active,
@@ -51,13 +54,41 @@ class RecurringDonationService
     }
 
     /**
-     * SEPA : 1re échéance au plus tôt à J + délai de pré-notification.
-     * Carte : dès aujourd'hui si le jour choisi est aujourd'hui, sinon prochaine occurrence.
+     * Don régulier « à régler par lien » : pas de moyen enregistré, la 1re échéance est
+     * réglée immédiatement par le donateur ; les suivantes lui sont envoyées par e-mail.
      */
-    public function firstChargeDate(PaymentMethod $method, int $dayOfMonth, ?CarbonImmutable $today = null): CarbonImmutable
+    public function startPayByLink(User $user, DonationRequest $request, PaymentMethodType $type): RecurringDonation
+    {
+        $rd = RecurringDonation::create([
+            'user_id' => $user->id,
+            'campaign_id' => $request->campaign?->id,
+            'collection_mode' => RecurringDonation::MODE_PAY_BY_LINK,
+            'method_type' => $type,
+            'amount_cents' => $request->amountCents,
+            'currency' => $request->currency(),
+            'frequency' => $request->frequency,
+            'day_of_month' => $request->dayOfMonth,
+            'status' => RecurringStatus::Active,
+            'started_at' => now(),
+            'next_charge_on' => CarbonImmutable::today(),
+        ]);
+
+        $this->audit->log('recurring.created', $rd, after: [
+            'amount' => $rd->amount_cents, 'currency' => $rd->currency, 'frequency' => $rd->frequency->value,
+            'mode' => RecurringDonation::MODE_PAY_BY_LINK, 'method' => $type->value,
+        ]);
+
+        return $rd;
+    }
+
+    /**
+     * SEPA : 1re échéance au plus tôt à J + délai de pré-notification.
+     * Carte / lien de paiement : dès aujourd'hui si le jour choisi est aujourd'hui, sinon prochaine occurrence.
+     */
+    public function firstChargeDate(?PaymentMethod $method, int $dayOfMonth, ?CarbonImmutable $today = null): CarbonImmutable
     {
         $today ??= CarbonImmutable::today();
-        $earliest = $method->isSepa() ? $today->addDays(config('payments.sepa.prenotification_days')) : $today;
+        $earliest = $method?->isSepa() ? $today->addDays(config('payments.sepa.prenotification_days')) : $today;
 
         return Frequency::firstOccurrence($earliest, $dayOfMonth);
     }
@@ -74,7 +105,7 @@ class RecurringDonationService
     {
         $this->transition($rd, 'recurring.resumed', function (RecurringDonation $rd) use ($today) {
             abort_unless(in_array($rd->status, [RecurringStatus::Paused, RecurringStatus::PastDue], true), 422, 'Ce don n\'est pas suspendu.');
-            abort_unless($rd->paymentMethod?->isActive(), 422, 'Ajoutez d\'abord un moyen de paiement valide.');
+            abort_unless($rd->isPayByLink() || $rd->paymentMethod?->isActive(), 422, 'Ajoutez d\'abord un moyen de paiement valide.');
 
             $next = $this->firstChargeDate($rd->paymentMethod, $rd->day_of_month, $today);
             if ($rd->next_charge_on && $rd->next_charge_on->gt($next)) {
@@ -92,7 +123,7 @@ class RecurringDonationService
 
     public function changeAmount(RecurringDonation $rd, int $amountCents): void
     {
-        abort_if($amountCents < config('payments.min_amount_cents') || $amountCents > config('payments.max_amount_cents'), 422, 'Montant hors limites.');
+        abort_if($amountCents < Money::min($rd->currency) || $amountCents > Money::max($rd->currency), 422, 'Montant hors limites.');
 
         $this->transition($rd, 'recurring.amount_changed', function (RecurringDonation $rd) use ($amountCents) {
             abort_unless($rd->isEditable(), 422);
@@ -117,7 +148,8 @@ class RecurringDonationService
         abort_unless($method->user_id === $rd->user_id && $method->isActive(), 422, 'Moyen de paiement invalide.');
 
         $this->transition($rd, 'recurring.method_changed', function (RecurringDonation $rd) use ($method) {
-            $updates = ['payment_method_id' => $method->id];
+            // Passer à un moyen enregistré rend l'échéancier automatique.
+            $updates = ['payment_method_id' => $method->id, 'collection_mode' => RecurringDonation::MODE_AUTOMATIC, 'method_type' => null];
             if ($method->isSepa() && $rd->next_charge_on) {
                 $minDate = $this->firstChargeDate($method, $rd->day_of_month);
                 $updates['next_charge_on'] = $rd->next_charge_on->lt($minDate) ? $minDate : $rd->next_charge_on;
@@ -147,7 +179,7 @@ class RecurringDonationService
             ->whereNotNull('paused_until')
             ->where('paused_until', '<=', $today->toDateString())
             ->each(function (RecurringDonation $rd) use (&$count, $today) {
-                if ($rd->paymentMethod?->isActive()) {
+                if ($rd->isPayByLink() || $rd->paymentMethod?->isActive()) {
                     $this->resume($rd, $today);
                     $count++;
                 }

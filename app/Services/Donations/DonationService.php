@@ -15,44 +15,56 @@ use App\Models\User;
 use App\Payments\GatewayManager;
 use App\Services\AuditLogger;
 use App\Services\Payments\ChargeService;
-use App\Services\Payments\CustomerService;
+use App\Services\Payments\HostedCheckoutService;
 use App\Services\Payments\MandateService;
+use App\Support\Money;
 use Carbon\CarbonImmutable;
 
 /**
  * Orchestration d'un don :
  *
- *                       ┌ moyen enregistré / nouveau mandat SEPA ─► prélèvement immédiat (MIT / OOFF)
- *  don ponctuel ────────┤
- *                       └ carte ─► page hébergée PSP (3DS) ─► webhook
+ *                 ┌ moyen enregistré / nouveau mandat SEPA ─► prélèvement immédiat (MIT / OOFF)
+ *  ponctuel ──────┤
+ *                 └ carte / compte Ecobank ─► page PSP (3DS) ou page OTP ─► webhook / validation
  *
- *                       ┌ moyen enregistré / nouveau mandat SEPA ─► échéancier actif (1re échéance planifiée)
- *  don régulier ────────┤
- *                       └ carte ─► 1er paiement hébergé (CIT, enrôlement) ─► échéancier actif, puis MIT
+ *                 ┌ moyen enregistré / mandat SEPA ─► échéancier automatique
+ *  régulier ──────┼ carte, PSP avec tokenisation ─► 1er paiement hébergé (CIT) puis MIT automatiques
+ *                 └ PSP sans débit automatique (Ecobank, UBA non tokenisé)
+ *                       ─► échéancier « à régler par lien » : 1re échéance payée tout de suite,
+ *                          les suivantes envoyées par e-mail
  */
 class DonationService
 {
     public function __construct(
         private readonly GatewayManager $gateways,
         private readonly MandateService $mandates,
-        private readonly CustomerService $customers,
         private readonly ChargeService $charges,
+        private readonly HostedCheckoutService $checkout,
         private readonly RecurringDonationService $recurring,
         private readonly AuditLogger $audit,
     ) {}
 
     public function donate(User $user, DonationRequest $request): DonationOutcome
     {
-        $this->assertAmount($request->amountCents);
+        $currency = $request->currency();
+        $this->assertAmount($request->amountCents, $currency);
+
+        if ($request->method === DonationRequest::METHOD_SEPA && $currency !== 'EUR') {
+            throw new \InvalidArgumentException('Le prélèvement SEPA n\'est possible qu\'en euros.');
+        }
 
         $method = match ($request->method) {
             DonationRequest::METHOD_SAVED => $user->paymentMethods()->active()->findOrFail($request->paymentMethodId),
             DonationRequest::METHOD_SEPA => $this->mandates->createSepaMandate(
                 $user, (string) $request->holderName, (string) $request->iban, $request->bic, $request->ip, $request->userAgent,
             ),
-            DonationRequest::METHOD_CARD => null,
+            DonationRequest::METHOD_CARD, DonationRequest::METHOD_ECOBANK => null,
             default => throw new \InvalidArgumentException('Unknown method '.$request->method),
         };
+
+        if ($method && ! $this->gateways->driver($method->gateway)->supportsCurrency($currency)) {
+            throw new \InvalidArgumentException('Ce moyen de paiement ne permet pas de donner en '.$currency.'.');
+        }
 
         return $request->isRecurring()
             ? $this->startRecurring($user, $request, $method)
@@ -65,20 +77,22 @@ class DonationService
             'user_id' => $user->id,
             'campaign_id' => $request->campaign?->id,
             'amount_cents' => $request->amountCents,
-            'currency' => config('payments.currency'),
+            'currency' => $request->currency(),
             'status' => DonationStatus::Pending,
             'message' => $request->message,
             'is_anonymous' => $request->anonymous,
         ]);
-        $this->audit->log('donation.created', $donation, after: ['amount' => $request->amountCents, 'method' => $request->method]);
+        $this->audit->log('donation.created', $donation, after: ['amount' => $request->amountCents, 'currency' => $request->currency(), 'method' => $request->method]);
 
         if ($method) {
-            $payment = $this->newPayment($user, $request, $method, SequenceType::OneOff, ['donation_id' => $donation->id]);
+            $payment = $this->newPayment($user, $request, $method->gateway, $method->type, SequenceType::OneOff, [
+                'donation_id' => $donation->id, 'payment_method_id' => $method->id,
+            ]);
 
             return new DonationOutcome(payment: $this->charges->submit($payment));
         }
 
-        return $this->hostedCheckout($user, $request, SequenceType::OneOff, ['donation_id' => $donation->id]);
+        return $this->interactive($user, $request, SequenceType::OneOff, ['donation_id' => $donation->id]);
     }
 
     private function startRecurring(User $user, DonationRequest $request, ?PaymentMethod $method): DonationOutcome
@@ -94,19 +108,35 @@ class DonationService
             return new DonationOutcome(payment: $payment, recurring: $rd->refresh());
         }
 
-        // Carte : le 1er paiement (3DS) enrôle la carte ; l'échéancier s'active au webhook « paid ».
+        $type = $request->interactiveType();
+        $driver = $this->gateways->forMethod($type, $request->currency());
+
+        if (! $driver->supportsOffSession($type)) {
+            // Échéances à régler par lien : la 1re est payée tout de suite par le donateur présent.
+            $rd = $this->recurring->startPayByLink($user, $request, $type);
+            $installment = $this->charges->openInstallment($rd, notify: false);
+
+            return new DonationOutcome(
+                redirectUrl: $installment ? $this->checkout->start($installment) : null,
+                payment: $installment,
+                recurring: $rd->refresh(),
+            );
+        }
+
+        // Carte enregistrable : le 1er paiement (3DS) enrôle la carte ; l'échéancier s'active au paiement.
         $rd = RecurringDonation::create([
             'user_id' => $user->id,
             'campaign_id' => $request->campaign?->id,
+            'collection_mode' => RecurringDonation::MODE_AUTOMATIC,
             'amount_cents' => $request->amountCents,
-            'currency' => config('payments.currency'),
+            'currency' => $request->currency(),
             'frequency' => $request->frequency,
             'day_of_month' => $request->dayOfMonth,
             'status' => RecurringStatus::Pending,
         ]);
-        $this->audit->log('recurring.created', $rd, after: ['amount' => $rd->amount_cents, 'frequency' => $rd->frequency->value, 'method' => 'card']);
+        $this->audit->log('recurring.created', $rd, after: ['amount' => $rd->amount_cents, 'frequency' => $rd->frequency->value, 'method' => $type->value]);
 
-        $outcome = $this->hostedCheckout($user, $request, SequenceType::First, [
+        $outcome = $this->interactive($user, $request, SequenceType::First, [
             'recurring_donation_id' => $rd->id,
             'period' => CarbonImmutable::today()->toDateString(),
         ]);
@@ -114,57 +144,49 @@ class DonationService
         return new DonationOutcome($outcome->redirectUrl, $outcome->payment, $rd);
     }
 
-    private function hostedCheckout(User $user, DonationRequest $request, SequenceType $sequence, array $links): DonationOutcome
+    /** Paiement initié par le donateur : page hébergée du PSP ou page OTP Ecobank. */
+    private function interactive(User $user, DonationRequest $request, SequenceType $sequence, array $links): DonationOutcome
     {
-        $driver = $this->gateways->forMethod(PaymentMethodType::Card);
-        $customerRef = $this->customers->referenceFor($user, $driver);
+        $type = $request->interactiveType();
+        $driver = $this->gateways->forMethod($type, $request->currency());
 
-        $payment = Payment::create(array_merge([
-            'user_id' => $user->id,
-            'campaign_id' => $request->campaign?->id,
-            'gateway' => $driver->name(),
-            'method_type' => PaymentMethodType::Card,
-            'sequence_type' => $sequence,
-            'amount_cents' => $request->amountCents,
-            'currency' => config('payments.currency'),
-            'status' => PaymentStatus::Pending,
+        $payment = $this->newPayment($user, $request, $driver->name(), $type, $sequence, array_merge($links, [
             'metadata' => [
-                'customer_ref' => $customerRef,
                 'consent' => $sequence === SequenceType::First ? [
                     'text' => 'Autorisation de débits récurrents (MIT) sur la carte enregistrée',
                     'frequency' => $request->frequency?->value,
                     'amount_cents' => $request->amountCents,
+                    'currency' => $request->currency(),
                     'accepted_at' => now()->toIso8601String(),
                     'ip' => $request->ip,
                     'user_agent' => mb_substr($request->userAgent, 0, 500),
                 ] : null,
             ],
-        ], $links));
+        ]));
 
-        $session = $driver->startHostedCheckout($payment, $customerRef, route('checkout.return', $payment));
-        $payment->update(['gateway_reference' => $session->reference, 'submitted_at' => now()]);
-
-        return new DonationOutcome(redirectUrl: $session->redirectUrl, payment: $payment);
+        return new DonationOutcome(redirectUrl: $this->checkout->start($payment), payment: $payment->refresh());
     }
 
-    private function newPayment(User $user, DonationRequest $request, PaymentMethod $method, SequenceType $sequence, array $links): Payment
+    private function newPayment(User $user, DonationRequest $request, string $gateway, PaymentMethodType $type, SequenceType $sequence, array $extra): Payment
     {
         return Payment::create(array_merge([
             'user_id' => $user->id,
             'campaign_id' => $request->campaign?->id,
-            'payment_method_id' => $method->id,
-            'gateway' => $method->gateway,
-            'method_type' => $method->type,
+            'gateway' => $gateway,
+            'method_type' => $type,
             'sequence_type' => $sequence,
             'amount_cents' => $request->amountCents,
-            'currency' => config('payments.currency'),
+            'currency' => $request->currency(),
             'status' => PaymentStatus::Pending,
-        ], $links));
+        ], $extra));
     }
 
-    private function assertAmount(int $cents): void
+    private function assertAmount(int $minor, string $currency): void
     {
-        if ($cents < config('payments.min_amount_cents') || $cents > config('payments.max_amount_cents')) {
+        if (! Money::isSupported($currency)) {
+            throw new \InvalidArgumentException('Devise non prise en charge : '.$currency);
+        }
+        if ($minor < Money::min($currency) || $minor > Money::max($currency)) {
             throw new \InvalidArgumentException('Montant hors limites');
         }
     }

@@ -37,7 +37,29 @@ Tâches planifiées (cron : `* * * * * php artisan schedule:run`) :
 | `donations:retry-failed` | Relances (dunning) à J+3 puis J+7 |
 | `payments:replay-events --failed` | Rejoue les webhooks en erreur |
 | `ledger:verify [--balance]` | Vérifie la chaîne de hash du grand livre |
+| `donations:remind-installments` | Relances et expiration des échéances « à régler par lien » |
 | `tax-receipts:issue [année] [--dry-run]` | Reçus fiscaux de l'année écoulée (planifié le 15 janvier). Idempotente |
+
+## Banques africaines : UBA et Ecobank
+
+Devises prises en charge : **EUR, USD, XOF, XAF, NGN**. Les montants sont stockés en unités mineures : centimes, kobo, et francs pour XOF/XAF qui n'ont pas de subdivision. La devise d'un don est celle de sa campagne ; les moyens proposés dépendent de la devise (`config/payments.php` > `currencies`). Le routage se fait par devise et par moyen de paiement (`PAYMENTS_XOF_CARD_GATEWAY=uba`, `PAYMENTS_XOF_ECOBANK_GATEWAY=ecobank`, etc.).
+
+| | UBA (API SeerBit) | Ecobank Direct Debit |
+|---|---|---|
+| Passerelle Omnipay | `SeerbitGateway` (écrite pour le projet) | `EcobankGateway` (écrite pour le projet) |
+| Don ponctuel | Page de paiement hébergée UBA (Standard Checkout) | Débit du compte, validé par OTP Ecobank Authenticator |
+| Don régulier | Prélèvement automatique si `UBA_HOSTED_TOKENIZATION=true`, sinon lien de paiement à chaque échéance | Lien de paiement à chaque échéance (OTP obligatoire à chaque débit) |
+| Webhooks | Non signés : chaque événement est vérifié en relisant le statut via l'API | Aucun webhook documenté : la validation OTP fait foi |
+| Remboursement | Depuis le tableau de bord marchand UBA | Non disponible par API |
+
+**Lien de paiement à chaque échéance** : à chaque date due, le donateur reçoit un e-mail « Régler mon don ». Il est relancé à J+3 et J+7, et le lien expire à J+14. Après 2 échéances manquées d'affilée, le don passe en « à régulariser ». La première échéance est payée immédiatement à l'inscription (`donations:remind-installments`, planifiée chaque jour).
+
+**Ecobank** : à son premier paiement, le donateur lie son compte une seule fois (code reçu par e-mail/SMS, création du profil, code de l'application Ecobank Authenticator). Ensuite, chaque paiement se valide avec un code Authenticator.
+
+> ⚠️ **À confirmer avant mise en production**
+> - **UBA** : la tokenisation via la page hébergée n'est pas documentée. L'API d'abonnement documentée (`/recurrent/plan/create`) exige d'envoyer le numéro de carte depuis notre serveur, ce qui fait entrer la plateforme dans le périmètre PCI DSS ; elle n'est **volontairement pas utilisée**. Demander à SeerBit si `tokenize` est accepté sur `/api/v2/payments` et où se trouve l'`authorizationCode` dans la réponse de statut. Le format des montants XOF (`"5000"`) est également à valider en sandbox.
+> - **Ecobank** : la documentation publique fournit les chemins et les formules de hash SHA-512, que nous avons implémentés. En revanche, le payload exact, les `requestType`, le format de réponse et l'endpoint de jeton ne sont visibles que dans la sandbox (connexion requise). Ils sont configurables (`ECOBANK_*`) et marqués « sandbox » dans `config/payments.php`.
+> - Les **reçus fiscaux** ne concernent que les dons en euros (cerfa français).
 
 ## Reçus fiscaux
 
@@ -101,7 +123,9 @@ Pour ajouter un PSP compatible Omnipay (GoCardless, Adyen, PayPlug…) : install
 php artisan test
 ```
 
-La suite compte 48 tests : parcours complets (SEPA ponctuel et mensuel, carte 3DS puis MIT, relances, révocation de mandat, rejet, idempotence des webhooks, gestion depuis l'espace donateur, IDOR), intégrité du grand livre, reçus fiscaux (éligibilité, numérotation, rectificatif, PDF, accès), et drivers Mollie et Stripe testés contre des réponses HTTP enregistrées (aucun appel réseau).
+La suite compte 66 tests : parcours complets (SEPA ponctuel et mensuel, carte 3DS puis MIT, relances, révocation de mandat, rejet, idempotence des webhooks, gestion depuis l'espace donateur, IDOR), échéances par lien de paiement (relances, expiration, nouvelle tentative), multi-devises, intégrité du grand livre, reçus fiscaux (éligibilité, numérotation, rectificatif, PDF, accès), et drivers Mollie, Stripe, UBA et Ecobank testés contre des réponses HTTP enregistrées (aucun appel réseau).
+
+- Banque « BSCA » : à ajouter dès que son nom complet et sa documentation d'API sont connus ;
 
 ## Reste à faire
 

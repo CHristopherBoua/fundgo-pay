@@ -43,7 +43,17 @@ class StripeDriver extends AbstractOmnipayDriver
 
     public function supports(PaymentMethodType $type): bool
     {
-        return true;
+        return in_array($type, [PaymentMethodType::SepaDebit, PaymentMethodType::Card], true);
+    }
+
+    public function supportsCurrency(string $currency): bool
+    {
+        return in_array(strtoupper($currency), $this->config['currencies'] ?? ['EUR', 'USD'], true);
+    }
+
+    public function supportsOffSession(PaymentMethodType $type): bool
+    {
+        return $this->supports($type);
     }
 
     /** @return FundgoStripeGateway */

@@ -26,6 +26,15 @@ interface PaymentDriver
     /** Le PSP sait-il traiter ce type de moyen de paiement ? */
     public function supports(PaymentMethodType $type): bool;
 
+    /** Devise ISO 4217 acceptée par ce PSP. */
+    public function supportsCurrency(string $currency): bool;
+
+    /**
+     * Le PSP peut-il débiter ce moyen sans le donateur (MIT / prélèvement) ?
+     * Sinon, les échéances d'un don régulier sont envoyées « à régler par lien ».
+     */
+    public function supportsOffSession(PaymentMethodType $type): bool;
+
     /**
      * Crée (ou retrouve) le client chez le PSP.
      *

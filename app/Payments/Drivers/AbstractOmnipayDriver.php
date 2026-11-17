@@ -2,6 +2,7 @@
 
 namespace App\Payments\Drivers;
 
+use App\Enums\PaymentMethodType;
 use App\Payments\Contracts\PaymentDriver;
 use App\Payments\Exceptions\PaymentGatewayException;
 use Illuminate\Support\Facades\Log;
@@ -29,6 +30,17 @@ abstract class AbstractOmnipayDriver implements PaymentDriver
     public function name(): string
     {
         return $this->name;
+    }
+
+    /** Devises déclarées dans la config de la passerelle (`currencies`), EUR par défaut. */
+    public function supportsCurrency(string $currency): bool
+    {
+        return in_array(strtoupper($currency), $this->config['currencies'] ?? ['EUR'], true);
+    }
+
+    public function supportsOffSession(PaymentMethodType $type): bool
+    {
+        return $this->supports($type);
     }
 
     protected function gateway(): GatewayInterface

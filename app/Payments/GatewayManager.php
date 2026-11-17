@@ -24,13 +24,21 @@ class GatewayManager
         return $this->drivers[$name] ??= $this->resolve($name);
     }
 
-    /** Passerelle à utiliser pour un type de moyen de paiement donné. */
-    public function forMethod(PaymentMethodType $type): PaymentDriver
+    /**
+     * Passerelle à utiliser pour un moyen de paiement et une devise.
+     * Ordre : routing_by_currency.{DEVISE}.{type} > routing.{type} > default.
+     */
+    public function forMethod(PaymentMethodType $type, ?string $currency = null): PaymentDriver
     {
-        $driver = $this->driver(config('payments.routing.'.$type->value) ?: null);
+        $currency = strtoupper($currency ?? config('payments.currency'));
+        $name = config("payments.routing_by_currency.$currency.{$type->value}")
+            ?: config('payments.routing.'.$type->value)
+            ?: null;
 
-        if (! $driver->supports($type)) {
-            throw new InvalidArgumentException("Gateway [{$driver->name()}] does not support [{$type->value}].");
+        $driver = $this->driver($name);
+
+        if (! $driver->supports($type) || ! $driver->supportsCurrency($currency)) {
+            throw new InvalidArgumentException("Gateway [{$driver->name()}] does not support [{$type->value}] in [$currency].");
         }
 
         return $driver;

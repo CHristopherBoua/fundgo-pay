@@ -26,10 +26,18 @@ class DashboardController extends Controller
             ->filter(fn (int $y) => config('tax_receipts.enabled') && $taxReceipts->eligiblePayments($user, $y)->isNotEmpty())
             ->sortDesc()->values();
 
+        // Totaux par devise : on n'additionne jamais des euros et des francs CFA.
+        $totals = fn ($query) => $query->selectRaw('currency, sum(amount_cents) as total')->groupBy('currency')
+            ->pluck('total', 'currency')->map(fn ($v) => (int) $v)->all();
+
         return view('donor.dashboard', [
             'user' => $user,
-            'totalThisYear' => (int) (clone $paid)->where('paid_at', '>=', now()->startOfYear())->sum('amount_cents'),
-            'totalLifetime' => (int) (clone $paid)->sum('amount_cents'),
+            'totalThisYear' => $totals((clone $paid)->where('paid_at', '>=', now()->startOfYear())),
+            'totalLifetime' => $totals(clone $paid),
+            'installments' => $user->payments()->with('campaign')
+                ->where('status', PaymentStatus::Pending)
+                ->whereNotNull('recurring_donation_id')
+                ->get()->filter(fn ($p) => ! empty($p->metadata['pay_by_link']))->values(),
             'deductibleThisYear' => (int) $taxReceipts->eligiblePayments($user, now()->year)->sum('amount_cents'),
             'recurring' => $user->recurringDonations()
                 ->with(['campaign', 'paymentMethod'])

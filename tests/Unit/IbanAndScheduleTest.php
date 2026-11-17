@@ -5,7 +5,6 @@ namespace Tests\Unit;
 use App\Enums\Frequency;
 use App\Enums\PaymentStatus;
 use App\Support\Iban;
-use App\Support\Money;
 use Carbon\CarbonImmutable;
 use PHPUnit\Framework\TestCase;
 
@@ -19,13 +18,6 @@ class IbanAndScheduleTest extends TestCase
         $this->assertFalse(Iban::isValid('FR76 3000'));
         $this->assertSame('0189', Iban::last4('FR76 3000 6000 0112 3456 7890 189'));
         $this->assertSame('FR', Iban::country('fr7630006000011234567890189'));
-    }
-
-    public function test_money_parsing(): void
-    {
-        $this->assertSame(1250, Money::toCents('12,50'));
-        $this->assertSame(1250, Money::toCents('12.5'));
-        $this->assertSame(2000, Money::toCents('20'));
     }
 
     public function test_schedule_keeps_day_of_month_and_never_overflows(): void

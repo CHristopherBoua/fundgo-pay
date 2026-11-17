@@ -34,7 +34,7 @@ class MollieDriver extends AbstractOmnipayDriver
 {
     public function supports(PaymentMethodType $type): bool
     {
-        return true;
+        return in_array($type, [PaymentMethodType::SepaDebit, PaymentMethodType::Card], true);
     }
 
     /** @return MollieGateway */
