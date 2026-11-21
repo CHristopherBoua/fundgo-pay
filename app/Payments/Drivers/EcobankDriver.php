@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Models\User;
+use App\Payments\Contracts\TestsConnection;
 use App\Payments\Data\ChargeResult;
 use App\Payments\Data\CheckoutSession;
 use App\Payments\Data\MandateResult;
@@ -30,8 +31,17 @@ use Illuminate\Support\Facades\Cache;
  * Aucun débit sans le donateur : les dons réguliers passent en « à régler par lien ».
  * Pas de webhook documenté pour ce service : le résultat de la validation fait foi.
  */
-class EcobankDriver extends AbstractOmnipayDriver
+class EcobankDriver extends AbstractOmnipayDriver implements TestsConnection
 {
+    /** Demande un nouveau jeton au service d'authentification Ecobank. */
+    public function testConnection(): string
+    {
+        Cache::forget('ecobank:token:'.$this->name);
+        $this->bearerToken();
+
+        return 'Identifiants Ecobank valides : jeton obtenu.';
+    }
+
     public function supports(PaymentMethodType $type): bool
     {
         return $type === PaymentMethodType::EcobankAccount;

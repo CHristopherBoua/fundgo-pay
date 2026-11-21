@@ -13,7 +13,13 @@ class User extends Authenticatable
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
 
-    /** `is_admin` n'est volontairement PAS assignable en masse. */
+    public const ROLE_DONOR = 'donor';
+
+    public const ROLE_ADMIN = 'admin';
+
+    public const ROLE_SUPERADMIN = 'superadmin';
+
+    /** `role` et les champs 2FA ne sont volontairement PAS assignables en masse. */
     protected $fillable = [
         'name',
         'email',
@@ -26,9 +32,12 @@ class User extends Authenticatable
         'country',
     ];
 
+    protected $attributes = ['role' => self::ROLE_DONOR];
+
     protected $hidden = [
         'password',
         'remember_token',
+        'two_factor_secret',
     ];
 
     protected function casts(): array
@@ -36,8 +45,24 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
-            'is_admin' => 'boolean',
+            'two_factor_secret' => 'encrypted',
+            'two_factor_confirmed_at' => 'datetime',
         ];
+    }
+
+    public function isAdmin(): bool
+    {
+        return in_array($this->role, [self::ROLE_ADMIN, self::ROLE_SUPERADMIN], true);
+    }
+
+    public function isSuperAdmin(): bool
+    {
+        return $this->role === self::ROLE_SUPERADMIN;
+    }
+
+    public function hasTwoFactor(): bool
+    {
+        return $this->two_factor_secret !== null && $this->two_factor_confirmed_at !== null;
     }
 
     public function donations(): HasMany

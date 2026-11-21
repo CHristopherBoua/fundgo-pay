@@ -40,6 +40,40 @@ Tâches planifiées (cron : `* * * * * php artisan schedule:run`) :
 | `donations:remind-installments` | Relances et expiration des échéances « à régler par lien » |
 | `tax-receipts:issue [année] [--dry-run]` | Reçus fiscaux de l'année écoulée (planifié le 15 janvier). Idempotente |
 
+## Administration
+
+**Créer le super-administrateur** (le mot de passe est demandé dans le terminal, il n'est stocké nulle part ailleurs) :
+
+```bash
+php artisan admin:create vous@exemple.org --name="Votre nom"
+```
+
+Connectez-vous ensuite normalement, puis ouvrez **`/admin`** (lien « Administration » dans l'en-tête). À la première visite, la **double authentification** se configure : vous scannez ou saisissez la clé dans une application d'authentification (Google Authenticator, Microsoft Authenticator, 1Password…). Le code est ensuite redemandé à chaque nouvelle session, et au plus tard toutes les 12 h (`ADMIN_2FA_TTL`). En cas de téléphone perdu : `php artisan admin:reset-2fa vous@exemple.org`.
+
+| Rôle | Accès |
+|---|---|
+| `admin` | Tableau de bord, campagnes, paiements et remboursements via API, donateurs, reçus fiscaux, webhooks, journal |
+| `superadmin` | Tout, plus : **Paramètres** (clés de liaison et routage), gestion des administrateurs, remboursements enregistrés manuellement, annulation de reçus |
+
+Pour ajouter un administrateur, la personne s'inscrit d'abord avec son propre mot de passe, puis un super-admin la promeut dans **Administrateurs**. Pour un visiteur non administrateur, l'espace `/admin` répond 404 : son existence n'est pas révélée.
+
+### Paramètres : clés de liaison des passerelles
+
+Dans **Administration > ⚙ Paramètres**, le super-admin saisit les clés de chaque passerelle :
+- **UBA** : clé publique, clé privée, pays par devise, tokenisation ;
+- **Ecobank** : URL, subscription key, client ID, secret key, affiliate et source codes, IP du serveur… ;
+- **Mollie** : clé API ;
+- **Stripe** : clé secrète et secret de signature des webhooks.
+
+Il y règle aussi le **routage** : quelle passerelle traite quel moyen de paiement, pour quelle devise.
+
+- Une valeur saisie dans l'admin **remplace** celle du `.env`. La case « revenir au .env » l'efface.
+- Les valeurs sont **chiffrées en base** avec `APP_KEY`. Les secrets ne sont jamais réaffichés (seulement `••••` et les 4 derniers caractères). Un champ secret laissé vide conserve la valeur existante. Le cache ne contient que des valeurs chiffrées.
+- Le bouton **Tester la connexion** (UBA, Ecobank) demande un vrai jeton au prestataire avec les clés saisies.
+- Chaque modification est tracée dans le journal d'audit : qui, quand et quelles clés, **jamais les valeurs**.
+
+> ⚠️ Changer `APP_KEY` rend illisibles les clés enregistrées dans l'admin : il faut alors les ressaisir.
+
 ## Banques africaines : UBA et Ecobank
 
 Devises prises en charge : **EUR, USD, XOF, XAF, NGN**. Les montants sont stockés en unités mineures : centimes, kobo, et francs pour XOF/XAF qui n'ont pas de subdivision. La devise d'un don est celle de sa campagne ; les moyens proposés dépendent de la devise (`config/payments.php` > `currencies`). Le routage se fait par devise et par moyen de paiement (`PAYMENTS_XOF_CARD_GATEWAY=uba`, `PAYMENTS_XOF_ECOBANK_GATEWAY=ecobank`, etc.).
@@ -123,13 +157,13 @@ Pour ajouter un PSP compatible Omnipay (GoCardless, Adyen, PayPlug…) : install
 php artisan test
 ```
 
-La suite compte 66 tests : parcours complets (SEPA ponctuel et mensuel, carte 3DS puis MIT, relances, révocation de mandat, rejet, idempotence des webhooks, gestion depuis l'espace donateur, IDOR), échéances par lien de paiement (relances, expiration, nouvelle tentative), multi-devises, intégrité du grand livre, reçus fiscaux (éligibilité, numérotation, rectificatif, PDF, accès), et drivers Mollie, Stripe, UBA et Ecobank testés contre des réponses HTTP enregistrées (aucun appel réseau).
+La suite compte 79 tests : back-office (rôles, double authentification TOTP, paramètres chiffrés, remboursements), parcours complets (SEPA ponctuel et mensuel, carte 3DS puis MIT, relances, révocation de mandat, rejet, idempotence des webhooks, gestion depuis l'espace donateur, IDOR), échéances par lien de paiement (relances, expiration, nouvelle tentative), multi-devises, intégrité du grand livre, reçus fiscaux (éligibilité, numérotation, rectificatif, PDF, accès), et drivers Mollie, Stripe, UBA et Ecobank testés contre des réponses HTTP enregistrées (aucun appel réseau).
 
 - Banque « BSCA » : à ajouter dès que son nom complet et sa documentation d'API sont connus ;
 
 ## Reste à faire
 
 - Réconciliation des relevés bancaires CAMT.053 avec les versements du PSP et le grand livre ;
-- Back-office administrateur (campagnes, remboursements, export comptable) ;
+- Export comptable (FEC / CSV) depuis le back-office ;
 - Réinitialisation du mot de passe et vérification de l'e-mail ;
 - Tests contre les sandbox Mollie et Stripe réelles (clés de test).

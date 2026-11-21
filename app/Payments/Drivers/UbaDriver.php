@@ -9,6 +9,7 @@ use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Models\User;
 use App\Payments\Contracts\ParsesWebhookBatches;
+use App\Payments\Contracts\TestsConnection;
 use App\Payments\Data\ChargeResult;
 use App\Payments\Data\CheckoutSession;
 use App\Payments\Data\MandateResult;
@@ -36,8 +37,17 @@ use Illuminate\Support\Facades\Log;
  *     • sinon -> échéances « à régler par lien ».
  * - Webhooks SeerBit NON signés : chaque événement est relu par l'API de statut.
  */
-class UbaDriver extends AbstractOmnipayDriver implements ParsesWebhookBatches
+class UbaDriver extends AbstractOmnipayDriver implements ParsesWebhookBatches, TestsConnection
 {
+    /** Demande un nouveau jeton à /encrypt/keys avec les clés configurées. */
+    public function testConnection(): string
+    {
+        Cache::forget('seerbit:token:'.$this->name);
+        $this->bearerToken();
+
+        return 'Clés UBA valides : jeton obtenu.';
+    }
+
     /** Codes « en attente » (doc UBA Status Code). */
     private const PENDING_CODES = ['S20', 'SM_P', 'SM_09', 'S0', '08', '02'];
 

@@ -68,6 +68,18 @@
         .fineprint { font-size: .82rem; color: var(--muted); }
         details summary { cursor: pointer; color: var(--brand); }
         [hidden] { display: none !important; }
+        .admin-nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 24px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+        .admin-nav a { padding: 6px 12px; border-radius: 8px; text-decoration: none; color: var(--text); font-size: .95rem; }
+        .admin-nav a.on { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+        .admin-nav .sep { flex: 1; }
+        .kv { display: grid; grid-template-columns: minmax(180px, 280px) 1fr; gap: 10px 16px; align-items: center; }
+        @media (max-width: 640px) { .kv { grid-template-columns: 1fr; } }
+        .src { font-size: .78rem; color: var(--muted); }
+        code.secret { font-family: ui-monospace, monospace; letter-spacing: .05em; }
+        .pagination { display: flex; gap: 4px; list-style: none; padding: 0; margin: 0; flex-wrap: wrap; }
+        .pagination li > * { display: inline-block; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; text-decoration: none; }
+        .pagination li.active > * { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+        .pagination li.disabled > * { color: var(--muted); }
         @media (max-width: 640px) { h1 { font-size: 1.45rem; } .card { padding: 18px; } nav { gap: 10px; font-size: .95rem; } }
     </style>
 </head>
@@ -78,6 +90,9 @@
         <nav>
             <a href="{{ route('home') }}">Campagnes</a>
             @auth
+                @if (auth()->user()->isAdmin())
+                    <a href="{{ route('admin.dashboard') }}"><strong>Administration</strong></a>
+                @endif
                 <a href="{{ route('dashboard') }}">Mon espace</a>
                 <form method="post" action="{{ route('logout') }}">@csrf<button class="btn small secondary" type="submit">Déconnexion</button></form>
             @else
